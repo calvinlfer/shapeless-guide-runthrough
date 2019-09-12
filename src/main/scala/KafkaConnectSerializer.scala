@@ -23,37 +23,39 @@ object KafkaConnectSerializer extends App {
     def encode(a: A): CStruct
   }
 
+  case class Error(message: String)
+
   trait ConnectSchemaDecoder[A] {
-    def decode(c: CSchema): A
+    def decode(c: CSchema): Either[Error, A]
   }
 
   trait ConnectSchemaStructDecoder[A] extends ConnectSchemaDecoder[A] {
-    def decode(c: CSchema): A = c match {
+    def decode(c: CSchema): Either[Error, A] = c match {
       case c: CStruct => decodeS(c)
-      case e          => throw new Exception(s"Expected CStruct but got $e")
+      case e          => Left(Error(s"Expected CStruct but got $e"))
     }
 
-    def decodeS(c: CStruct): A
+    def decodeS(c: CStruct): Either[Error, A]
   }
 
   object ConnectSchemaDecoder {
     def apply[A](implicit C: ConnectSchemaStructDecoder[A]): ConnectSchemaStructDecoder[A] = C
-    def convertBack[A](f: CSchema => A): ConnectSchemaDecoder[A] =
+    def convertBack[A](f: CSchema => Either[Error, A]): ConnectSchemaDecoder[A] =
       (c: CSchema) => f(c)
-    def convertBackS[A](f: CStruct => A): ConnectSchemaStructDecoder[A] =
+    def convertBackS[A](f: CStruct => Either[Error, A]): ConnectSchemaStructDecoder[A] =
       (c: CStruct) => f(c)
 
     implicit val intEncoder: ConnectSchemaDecoder[Int] = convertBack {
-      case CInt32(i) => i
-      case e         => sys.error(s"cannot convert $e to int")
+      case CInt32(i) => Right(i)
+      case e         => Left(Error(s"cannot convert $e to int"))
     }
 
     implicit val stringEncoder: ConnectSchemaDecoder[String] = convertBack {
-      case CStr(s) => s
-      case e       => sys.error(s"cannot convert $e to string")
+      case CStr(s) => Right(s)
+      case e       => Left(Error(s"cannot convert $e to string"))
     }
 
-    implicit val hnilEncoder: ConnectSchemaStructDecoder[HNil] = convertBackS(_ => HNil)
+    implicit val hnilEncoder: ConnectSchemaStructDecoder[HNil] = convertBackS(_ => Right(HNil))
 
     implicit def hlistEncoder[K <: Symbol, H, T <: HList](
       implicit
@@ -62,14 +64,17 @@ object KafkaConnectSerializer extends App {
       tDecoder: ConnectSchemaStructDecoder[T]
     ): ConnectSchemaStructDecoder[FieldType[K, H] :: T] = convertBackS { cStruct =>
       val fieldName = witness.value.name
-      val value = {
+      val value: Either[Error, H] = {
         val raw = cStruct.underlying
           .find(_._1 == fieldName)
           .getOrElse(throw new Exception(s"Could not find field $fieldName"))
         hDecoder.value.decode(raw._2)
       }
-      val tail = tDecoder.decode(cStruct)
-      field[K](value) :: tail
+      val tail: Either[Error, T] = tDecoder.decode(cStruct)
+      for {
+        h <- value
+        t <- tail
+      } yield field[K](h) :: t
     }
 
     implicit def genericDecoder[A, R](
@@ -78,8 +83,8 @@ object KafkaConnectSerializer extends App {
       enc: Lazy[ConnectSchemaStructDecoder[R]]
     ): ConnectSchemaStructDecoder[A] =
       convertBackS { cStruct =>
-        val r = enc.value.decode(cStruct)
-        gen.from(r)
+        val rEither = enc.value.decode(cStruct)
+        rEither.map(r => gen.from(r))
       }
   }
 
