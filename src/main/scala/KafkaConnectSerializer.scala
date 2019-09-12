@@ -50,9 +50,9 @@ object KafkaConnectSerializer extends App {
     ): ConnectSchemaStructEncoder[FieldType[K, H] :: T] = convertS {
       case h :: t =>
         val fieldName = witness.value.name
-        val head = CStruct((fieldName, hEncoder.value.encode(h)) :: Nil)
+        val head = (fieldName, hEncoder.value.encode(h))
         val tail = tEncoder.encode(t)
-        CStruct(head.underlying ++ tail.underlying)
+        CStruct(head :: tail.underlying)
     }
 
     implicit val cnilEncoder: ConnectSchemaStructEncoder[CNil] =
@@ -142,12 +142,12 @@ object KafkaConnectSerializer extends App {
     }
   }
 
-  case class Book(name: String, pages: Int)
+  case class Book(name: String, pages: Int, color: String, `type`: String)
   case class Student(name: String, id: Int, book: Book)
   println {
     structInterpreter {
       ConnectSchemaEncoder[Student].encode(
-        Student("calvin", 1, Book("Category Theory", 367)))
+        Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover")))
     }
   }
 }
