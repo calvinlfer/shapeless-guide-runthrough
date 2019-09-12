@@ -1,30 +1,18 @@
-import org.apache.kafka.connect.data.{Schema, SchemaBuilder, Struct}
+import org.apache.kafka.connect.data.{ Schema, SchemaBuilder, Struct }
 import Schema._
-import shapeless.labelled.{FieldType, field}
-import shapeless.{
-  :+:,
-  ::,
-  CNil,
-  Coproduct,
-  HList,
-  HNil,
-  Inl,
-  Inr,
-  LabelledGeneric,
-  Lazy,
-  Witness
-}
+import shapeless.labelled.{ field, FieldType }
+import shapeless.{ :+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGeneric, Lazy, Witness }
 
 object KafkaConnectSerializer extends App {
   sealed trait CSchema
-  case class CInt8(b: Byte) extends CSchema
-  case class CInt16(s: Short) extends CSchema
-  case class CInt32(i: Int) extends CSchema
-  case class CInt64(l: Long) extends CSchema
-  case class CFloat32(f: Float) extends CSchema
-  case class CFloat64(d: Double) extends CSchema
-  case class CCh(c: Char) extends CSchema
-  case class CStr(s: String) extends CSchema
+  case class CInt8(b: Byte)                               extends CSchema
+  case class CInt16(s: Short)                             extends CSchema
+  case class CInt32(i: Int)                               extends CSchema
+  case class CInt64(l: Long)                              extends CSchema
+  case class CFloat32(f: Float)                           extends CSchema
+  case class CFloat64(d: Double)                          extends CSchema
+  case class CCh(c: Char)                                 extends CSchema
+  case class CStr(s: String)                              extends CSchema
   case class CStruct(underlying: List[(String, CSchema)]) extends CSchema
 
   trait ConnectSchemaEncoder[A] {
@@ -42,15 +30,14 @@ object KafkaConnectSerializer extends App {
   trait ConnectSchemaStructDecoder[A] extends ConnectSchemaDecoder[A] {
     def decode(c: CSchema): A = c match {
       case c: CStruct => decodeS(c)
-      case e => throw new Exception(s"Expected CStruct but got $e")
+      case e          => throw new Exception(s"Expected CStruct but got $e")
     }
 
     def decodeS(c: CStruct): A
   }
 
   object ConnectSchemaDecoder {
-    def apply[A](implicit C: ConnectSchemaStructDecoder[A])
-      : ConnectSchemaStructDecoder[A] = C
+    def apply[A](implicit C: ConnectSchemaStructDecoder[A]): ConnectSchemaStructDecoder[A] = C
     def convertBack[A](f: CSchema => A): ConnectSchemaDecoder[A] =
       (c: CSchema) => f(c)
     def convertBackS[A](f: CStruct => A): ConnectSchemaStructDecoder[A] =
@@ -66,31 +53,29 @@ object KafkaConnectSerializer extends App {
       case e       => sys.error(s"cannot convert $e to string")
     }
 
-    implicit val hnilEncoder: ConnectSchemaStructDecoder[HNil] = convertBackS(
-      _ => HNil)
+    implicit val hnilEncoder: ConnectSchemaStructDecoder[HNil] = convertBackS(_ => HNil)
 
     implicit def hlistEncoder[K <: Symbol, H, T <: HList](
-        implicit
-        witness: Witness.Aux[K],
-        hDecoder: Lazy[ConnectSchemaDecoder[H]],
-        tDecoder: ConnectSchemaStructDecoder[T]
-    ): ConnectSchemaStructDecoder[FieldType[K, H] :: T] = convertBackS {
-      cStruct =>
-        val fieldName = witness.value.name
-        val value = {
-          val raw = cStruct.underlying
-            .find(_._1 == fieldName)
-            .getOrElse(throw new Exception(s"Could not find field $fieldName"))
-          hDecoder.value.decode(raw._2)
-        }
-        val tail = tDecoder.decode(cStruct)
-        field[K](value) :: tail
+      implicit
+      witness: Witness.Aux[K],
+      hDecoder: Lazy[ConnectSchemaDecoder[H]],
+      tDecoder: ConnectSchemaStructDecoder[T]
+    ): ConnectSchemaStructDecoder[FieldType[K, H] :: T] = convertBackS { cStruct =>
+      val fieldName = witness.value.name
+      val value = {
+        val raw = cStruct.underlying
+          .find(_._1 == fieldName)
+          .getOrElse(throw new Exception(s"Could not find field $fieldName"))
+        hDecoder.value.decode(raw._2)
+      }
+      val tail = tDecoder.decode(cStruct)
+      field[K](value) :: tail
     }
 
     implicit def genericDecoder[A, R](
-        implicit
-        gen: LabelledGeneric.Aux[A, R],
-        enc: Lazy[ConnectSchemaStructDecoder[R]]
+      implicit
+      gen: LabelledGeneric.Aux[A, R],
+      enc: Lazy[ConnectSchemaStructDecoder[R]]
     ): ConnectSchemaStructDecoder[A] =
       convertBackS { cStruct =>
         val r = enc.value.decode(cStruct)
@@ -106,49 +91,46 @@ object KafkaConnectSerializer extends App {
     def convertS[A](f: A => CStruct): ConnectSchemaStructEncoder[A] =
       (a: A) => f(a)
 
-    implicit val byteEncoder: ConnectSchemaEncoder[Byte] = convert(CInt8)
-    implicit val shortEncoder: ConnectSchemaEncoder[Short] = convert(CInt16)
-    implicit val intEncoder: ConnectSchemaEncoder[Int] = convert(CInt32)
-    implicit val longEncoder: ConnectSchemaEncoder[Long] = convert(CInt64)
-    implicit val charEncoder: ConnectSchemaEncoder[Char] = convert(CCh)
-    implicit val floatEncoder: ConnectSchemaEncoder[Float] = convert(CFloat32)
+    implicit val byteEncoder: ConnectSchemaEncoder[Byte]     = convert(CInt8)
+    implicit val shortEncoder: ConnectSchemaEncoder[Short]   = convert(CInt16)
+    implicit val intEncoder: ConnectSchemaEncoder[Int]       = convert(CInt32)
+    implicit val longEncoder: ConnectSchemaEncoder[Long]     = convert(CInt64)
+    implicit val charEncoder: ConnectSchemaEncoder[Char]     = convert(CCh)
+    implicit val floatEncoder: ConnectSchemaEncoder[Float]   = convert(CFloat32)
     implicit val doubleEncoder: ConnectSchemaEncoder[Double] = convert(CFloat64)
     implicit val stringEncoder: ConnectSchemaEncoder[String] = convert(CStr)
 
-    implicit val hnilEncoder: ConnectSchemaStructEncoder[HNil] = convertS(
-      _ => CStruct(Nil))
+    implicit val hnilEncoder: ConnectSchemaStructEncoder[HNil] = convertS(_ => CStruct(Nil))
 
     implicit def hlistEncoder[K <: Symbol, H, T <: HList](
-        implicit
-        witness: Witness.Aux[K],
-        hEncoder: Lazy[ConnectSchemaEncoder[H]],
-        tEncoder: ConnectSchemaStructEncoder[T]
+      implicit
+      witness: Witness.Aux[K],
+      hEncoder: Lazy[ConnectSchemaEncoder[H]],
+      tEncoder: ConnectSchemaStructEncoder[T]
     ): ConnectSchemaStructEncoder[FieldType[K, H] :: T] = convertS {
       case h :: t =>
         val fieldName = witness.value.name
-        val head = (fieldName, hEncoder.value.encode(h))
-        val tail = tEncoder.encode(t)
+        val head      = (fieldName, hEncoder.value.encode(h))
+        val tail      = tEncoder.encode(t)
         CStruct(head :: tail.underlying)
     }
 
     implicit val cnilEncoder: ConnectSchemaStructEncoder[CNil] =
-      convertS(_ =>
-        throw new Exception(
-          "This cannot happen as CNil is equivalent to Nothing and has no type inhabitants"))
+      convertS(_ => throw new Exception("This cannot happen as CNil is equivalent to Nothing and has no type inhabitants"))
 
     // NOTE: I'm expecting a sealed trait whose subtypes are case classes so they will only produce CStructs
     // So I use hEncoder: Lazy[ConnectSchemaStructEncoder[H]], instead of ConnectSchemaEncoder like we did in HList
     // here a Witness on K refers to the name of the sealed trait subtype
     implicit def coproductEncoder[K <: Symbol, H, T <: Coproduct](
-        implicit
-        witness: Witness.Aux[K],
-        hEncoder: Lazy[ConnectSchemaStructEncoder[H]],
-        tEncoder: ConnectSchemaStructEncoder[T]
+      implicit
+      witness: Witness.Aux[K],
+      hEncoder: Lazy[ConnectSchemaStructEncoder[H]],
+      tEncoder: ConnectSchemaStructEncoder[T]
     ): ConnectSchemaStructEncoder[FieldType[K, H] :+: T] = convertS {
       case Inl(head) =>
         val typeName = witness.value.name
         val existing = hEncoder.value.encode(head).underlying
-        val newInfo = "type" -> CStr(typeName)
+        val newInfo  = "type" -> CStr(typeName)
         CStruct(newInfo :: existing)
 
       case Inr(tail) =>
@@ -156,9 +138,9 @@ object KafkaConnectSerializer extends App {
     }
 
     implicit def genericEncoder[A, R](
-        implicit
-        gen: LabelledGeneric.Aux[A, R],
-        enc: Lazy[ConnectSchemaStructEncoder[R]]
+      implicit
+      gen: LabelledGeneric.Aux[A, R],
+      enc: Lazy[ConnectSchemaStructEncoder[R]]
     ): ConnectSchemaStructEncoder[A] =
       convertS(a => enc.value.encode(gen.to(a)))
   }
@@ -185,7 +167,7 @@ object KafkaConnectSerializer extends App {
   def structInterpreter(c: CSchema): Struct = {
     val schema = schemaInterpreter(c)
 
-    def go(c: CSchema): Struct = {
+    def go(c: CSchema): Struct =
       c match {
         case CStruct(underlying) =>
           underlying.foldLeft(new Struct(schema)) {
@@ -205,12 +187,11 @@ object KafkaConnectSerializer extends App {
           }
         case _ => new Struct(schema)
       }
-    }
     go(c)
   }
 
   sealed trait Shape
-  case class Circle(radius: Double) extends Shape
+  case class Circle(radius: Double)                extends Shape
   case class Square(length: Double, width: Double) extends Shape
   println {
     structInterpreter {
@@ -222,15 +203,11 @@ object KafkaConnectSerializer extends App {
   case class Student(name: String, id: Int, book: Book)
   println {
     structInterpreter {
-      ConnectSchemaEncoder[Student].encode(
-        Student("calvin",
-                1,
-                Book("Category Theory", 367, "Blue", "Soft-cover")))
+      ConnectSchemaEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover")))
     }
   }
 
-  val cSchema = ConnectSchemaEncoder[Student].encode(
-    Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover")))
+  val cSchema = ConnectSchemaEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover")))
   println {
     ConnectSchemaDecoder[Student].decode(cSchema)
   }
