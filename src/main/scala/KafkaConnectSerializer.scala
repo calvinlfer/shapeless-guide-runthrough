@@ -1,7 +1,7 @@
 import org.apache.kafka.connect.data.{Schema, SchemaBuilder, Struct}
 import Schema._
 import shapeless.labelled.FieldType
-import shapeless.{::, HList, HNil, LabelledGeneric, Lazy, Witness}
+import shapeless.{:+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGeneric, Lazy, Witness}
 
 object KafkaConnectSerializer extends App {
   sealed trait CSchema
@@ -55,6 +55,30 @@ object KafkaConnectSerializer extends App {
         CStruct(head.underlying ++ tail.underlying)
     }
 
+    implicit val cnilEncoder: ConnectSchemaStructEncoder[CNil] =
+      convertS(_ =>
+        throw new Exception(
+          "This cannot happen as CNil is equivalent to Nothing and has no type inhabitants"))
+
+    // NOTE: I'm expecting a sealed trait whose subtypes are case classes so they will only produce CStructs
+    // So I use hEncoder: Lazy[ConnectSchemaStructEncoder[H]], instead of ConnectSchemaEncoder like we did in HList
+    // here a Witness on K refers to the name of the sealed trait subtype
+    implicit def coproductEncoder[K <: Symbol, H, T <: Coproduct](
+        implicit
+        witness: Witness.Aux[K],
+        hEncoder: Lazy[ConnectSchemaStructEncoder[H]],
+        tEncoder: ConnectSchemaStructEncoder[T]
+    ): ConnectSchemaStructEncoder[FieldType[K, H] :+: T] = convertS {
+      case Inl(head) =>
+        val typeName = witness.value.name
+        val existing = hEncoder.value.encode(head).underlying
+        val newInfo = "type" -> CStr(typeName)
+        CStruct(newInfo :: existing)
+
+      case Inr(tail) =>
+        tEncoder.encode(tail)
+    }
+
     implicit def genericEncoder[A, R](
         implicit
         gen: LabelledGeneric.Aux[A, R],
@@ -91,15 +115,15 @@ object KafkaConnectSerializer extends App {
           underlying.foldLeft(new Struct(schema)) {
             case (acc, (fieldName, fieldSchema)) =>
               val unsafe: Any = fieldSchema match {
-                case CInt8(x)    => x
-                case CInt16(x)   => x
-                case CInt32(x)   => x
-                case CInt64(x)   => x
-                case CFloat32(x) => x
-                case CFloat64(x) => x
-                case CStr(x)     => x
-                case CCh(x)      => x
-                case c @ CStruct(_)  => structInterpreter(c)
+                case CInt8(x)       => x
+                case CInt16(x)      => x
+                case CInt32(x)      => x
+                case CInt64(x)      => x
+                case CFloat32(x)    => x
+                case CFloat64(x)    => x
+                case CStr(x)        => x
+                case CCh(x)         => x
+                case c @ CStruct(_) => structInterpreter(c)
               }
               acc.put(fieldName, unsafe)
           }
@@ -109,11 +133,21 @@ object KafkaConnectSerializer extends App {
     go(c)
   }
 
+  sealed trait Shape
+  case class Circle(radius: Double) extends Shape
+  case class Square(length: Double, width: Double) extends Shape
+  println {
+    structInterpreter {
+      ConnectSchemaEncoder[Shape].encode(Circle(10))
+    }
+  }
+
   case class Book(name: String, pages: Int)
   case class Student(name: String, id: Int, book: Book)
   println {
     structInterpreter {
-      ConnectSchemaEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367)))
+      ConnectSchemaEncoder[Student].encode(
+        Student("calvin", 1, Book("Category Theory", 367)))
     }
   }
 }
