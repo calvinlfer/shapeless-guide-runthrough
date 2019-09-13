@@ -1,7 +1,10 @@
-import org.apache.kafka.connect.data.{ Schema, SchemaBuilder, Struct }
+import org.apache.kafka.connect.data._
 import Schema._
 import shapeless.labelled.{ field, FieldType }
 import shapeless.{ :+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGeneric, Lazy, Witness }
+import java.math.{ BigDecimal => JBigDecimal }
+
+import scala.jdk.CollectionConverters._
 
 object KafkaConnectSerializer extends App {
   sealed trait CSchema
@@ -13,6 +16,8 @@ object KafkaConnectSerializer extends App {
   case class CFloat64(d: Double)                          extends CSchema
   case class CCh(c: Char)                                 extends CSchema
   case class CStr(s: String)                              extends CSchema
+  case class CBool(b: Boolean)                            extends CSchema
+  case class CBigDecimal(b: JBigDecimal)                  extends CSchema
   case class CStruct(underlying: List[(String, CSchema)]) extends CSchema
 
   trait ConnectSchemaEncoder[A] {
@@ -45,9 +50,19 @@ object KafkaConnectSerializer extends App {
     def convertBackS[A](f: CStruct => Either[Error, A]): ConnectSchemaStructDecoder[A] =
       (c: CStruct) => f(c)
 
-    implicit val intEncoder: ConnectSchemaDecoder[Int] = convertBack {
+    implicit val intDecoder: ConnectSchemaDecoder[Int] = convertBack {
       case CInt32(i) => Right(i)
       case e         => Left(Error(s"cannot convert $e to int"))
+    }
+
+    implicit val bigDecimalDecoder: ConnectSchemaDecoder[BigDecimal] = convertBack {
+      case CBigDecimal(b) => Right(b)
+      case e              => Left(Error(s"cannot convert $e to BigDecimal"))
+    }
+
+    implicit val jBigDecimalDecoder: ConnectSchemaDecoder[JBigDecimal] = convertBack {
+      case CBigDecimal(b) => Right(b)
+      case e              => Left(Error(s"cannot convert $e to BigDecimal"))
     }
 
     implicit val stringEncoder: ConnectSchemaDecoder[String] = convertBack {
@@ -96,14 +111,16 @@ object KafkaConnectSerializer extends App {
     def convertS[A](f: A => CStruct): ConnectSchemaStructEncoder[A] =
       (a: A) => f(a)
 
-    implicit val byteEncoder: ConnectSchemaEncoder[Byte]     = convert(CInt8)
-    implicit val shortEncoder: ConnectSchemaEncoder[Short]   = convert(CInt16)
-    implicit val intEncoder: ConnectSchemaEncoder[Int]       = convert(CInt32)
-    implicit val longEncoder: ConnectSchemaEncoder[Long]     = convert(CInt64)
-    implicit val charEncoder: ConnectSchemaEncoder[Char]     = convert(CCh)
-    implicit val floatEncoder: ConnectSchemaEncoder[Float]   = convert(CFloat32)
-    implicit val doubleEncoder: ConnectSchemaEncoder[Double] = convert(CFloat64)
-    implicit val stringEncoder: ConnectSchemaEncoder[String] = convert(CStr)
+    implicit val bigDecimalEncoder: ConnectSchemaEncoder[BigDecimal]   = convert(b => CBigDecimal(b.bigDecimal))
+    implicit val jBigDecimalEncoder: ConnectSchemaEncoder[JBigDecimal] = convert(CBigDecimal)
+    implicit val byteEncoder: ConnectSchemaEncoder[Byte]               = convert(CInt8)
+    implicit val shortEncoder: ConnectSchemaEncoder[Short]             = convert(CInt16)
+    implicit val intEncoder: ConnectSchemaEncoder[Int]                 = convert(CInt32)
+    implicit val longEncoder: ConnectSchemaEncoder[Long]               = convert(CInt64)
+    implicit val charEncoder: ConnectSchemaEncoder[Char]               = convert(CCh)
+    implicit val floatEncoder: ConnectSchemaEncoder[Float]             = convert(CFloat32)
+    implicit val doubleEncoder: ConnectSchemaEncoder[Double]           = convert(CFloat64)
+    implicit val stringEncoder: ConnectSchemaEncoder[String]           = convert(CStr)
 
     implicit val hnilEncoder: ConnectSchemaStructEncoder[HNil] = convertS(_ => CStruct(Nil))
 
@@ -152,14 +169,16 @@ object KafkaConnectSerializer extends App {
 
   def schemaInterpreter(c: CSchema): Schema =
     c match {
-      case _: CInt8    => INT8_SCHEMA
-      case _: CInt16   => INT16_SCHEMA
-      case CInt32(_)   => INT32_SCHEMA
-      case CInt64(_)   => INT64_SCHEMA
-      case CFloat32(_) => FLOAT32_SCHEMA
-      case CFloat64(_) => FLOAT64_SCHEMA
-      case CStr(_)     => STRING_SCHEMA
-      case CCh(_)      => STRING_SCHEMA
+      case _: CBool       => BOOLEAN_SCHEMA
+      case _: CInt8       => INT8_SCHEMA
+      case _: CInt16      => INT16_SCHEMA
+      case CInt32(_)      => INT32_SCHEMA
+      case CInt64(_)      => INT64_SCHEMA
+      case CFloat32(_)    => FLOAT32_SCHEMA
+      case CFloat64(_)    => FLOAT64_SCHEMA
+      case CStr(_)        => STRING_SCHEMA
+      case CCh(_)         => STRING_SCHEMA
+      case CBigDecimal(b) => Decimal.builder(b.scale).build() // dynamically build out the schema using the BigDecimal
       case CStruct(underlying) =>
         underlying
           .foldLeft(SchemaBuilder.struct()) {
@@ -178,6 +197,7 @@ object KafkaConnectSerializer extends App {
           underlying.foldLeft(new Struct(schema)) {
             case (acc, (fieldName, fieldSchema)) =>
               val unsafe: Any = fieldSchema match {
+                case CBool(x)       => x
                 case CInt8(x)       => x
                 case CInt16(x)      => x
                 case CInt32(x)      => x
@@ -186,6 +206,7 @@ object KafkaConnectSerializer extends App {
                 case CFloat64(x)    => x
                 case CStr(x)        => x
                 case CCh(x)         => x
+                case CBigDecimal(x) => x
                 case c @ CStruct(_) => structInterpreter(c)
               }
               acc.put(fieldName, unsafe)
@@ -194,6 +215,52 @@ object KafkaConnectSerializer extends App {
       }
     go(c)
   }
+
+  def cSchemaInterpreter(s: Schema, st: Struct): CStruct =
+    s.fields()
+      .asScala
+      .map { field =>
+        val fieldName   = field.name()
+        val connectType = field.schema().`type`()
+        connectType match {
+          case Type.STRING =>
+            CStruct((fieldName, CStr(st.getString(fieldName))) :: Nil)
+
+          case Type.STRUCT =>
+            cSchemaInterpreter(field.schema(), st.getStruct(fieldName))
+
+          case Type.INT8 =>
+            CStruct((fieldName, CInt8(st.getInt8(fieldName))) :: Nil)
+
+          case Type.INT16 =>
+            CStruct((fieldName, CInt16(st.getInt16(fieldName))) :: Nil)
+
+          case Type.INT32 =>
+            CStruct((fieldName, CInt32(st.getInt32(fieldName))) :: Nil)
+
+          case Type.INT64 =>
+            CStruct((fieldName, CInt64(st.getInt64(fieldName))) :: Nil)
+
+          case Type.FLOAT32 =>
+            CStruct((fieldName, CFloat32(st.getFloat32(fieldName))) :: Nil)
+
+          case Type.FLOAT64 =>
+            CStruct((fieldName, CFloat64(st.getFloat64(fieldName))) :: Nil)
+
+          case Type.BOOLEAN =>
+            CStruct((fieldName, CBool(st.getBoolean(fieldName))) :: Nil)
+
+          case Type.BYTES =>
+            val name = field.schema().name()
+            name match {
+              case Decimal.LOGICAL_NAME =>
+                // doing it via getBytes and Decimal.toLogical doesn't seem to work :(
+                val bd = st.get(field).asInstanceOf[java.math.BigDecimal]
+                CStruct((fieldName, CBigDecimal(bd)) :: Nil)
+            }
+        }
+      }
+      .reduce((a, b) => CStruct(a.underlying ++ b.underlying))
 
   sealed trait Shape
   case class Circle(radius: Double)                extends Shape
@@ -205,15 +272,24 @@ object KafkaConnectSerializer extends App {
   }
 
   case class Book(name: String, pages: Int, color: String, `type`: String)
-  case class Student(name: String, id: Int, book: Book)
+  case class Student(name: String, id: Int, book: Book, tag: BigDecimal)
   println {
     structInterpreter {
-      ConnectSchemaEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover")))
+      ConnectSchemaEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), BigDecimal(102, 2)))
     }
   }
 
-  val cSchema = ConnectSchemaEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover")))
+  val cSchema = ConnectSchemaEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), JBigDecimal.valueOf(102, 2)))
   println {
     ConnectSchemaDecoder[Student].decode(cSchema)
+  }
+
+  println {
+    cSchemaInterpreter(
+      schemaInterpreter(cSchema): Schema,
+      structInterpreter {
+        ConnectSchemaEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), JBigDecimal.valueOf(102, 2)))
+      }: Struct
+    )
   }
 }
