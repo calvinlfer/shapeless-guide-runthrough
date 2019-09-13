@@ -54,6 +54,11 @@ object CRepDecoder {
     case e           => Left(Error(s"cannot convert $e to Double"))
   }
 
+  implicit val byteArrayDecoder: CRepDecoder[Array[Byte]] = convertBack {
+    case CBytes(a) => Right(a)
+    case e         => Left(Error(s"cannot convert $e to Array[Byte]"))
+  }
+
   implicit val hnilEncoder: CStructDecoder[HNil] = convertBackS(_ => Right(HNil))
 
   implicit def hlistEncoder[K <: Symbol, H, T <: HList](

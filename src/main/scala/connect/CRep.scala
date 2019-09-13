@@ -80,7 +80,7 @@ object CRep {
   }
 
   import org.apache.kafka.connect.data.Schema.Type._
-  def cSchemaInterpreter(s: Schema, st: Struct): CStruct =
+  def cRepInterpreter(s: Schema, st: Struct): CStruct =
     s.fields()
       .asScala
       .map { field =>
@@ -92,7 +92,7 @@ object CRep {
             CStruct((fieldName, CStr(st.getString(fieldName))) :: Nil)
 
           case STRUCT =>
-            cSchemaInterpreter(schema, st.getStruct(fieldName))
+            cRepInterpreter(schema, st.getStruct(fieldName))
 
           case INT8 =>
             CStruct((fieldName, CInt8(st.getInt8(fieldName))) :: Nil)

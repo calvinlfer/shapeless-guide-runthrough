@@ -17,7 +17,7 @@ object KafkaConnectExample extends App {
   val circleRep = CRepEncoder[Shape].encode(Circle(10))
   println {
     CRepDecoder[Shape].decode {
-      cSchemaInterpreter(
+      cRepInterpreter(
         s = schemaInterpreter(circleRep),
         st = structInterpreter(circleRep)
       )
@@ -38,11 +38,21 @@ object KafkaConnectExample extends App {
   }
 
   println {
-    cSchemaInterpreter(
+    cRepInterpreter(
       schemaInterpreter(cSchema): Schema,
       structInterpreter {
         CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), JBigDecimal.valueOf(102, 2)))
       }: Struct
     )
+  }
+
+  case class ArrayOfBytes(b: Array[Byte])
+  val example       = ArrayOfBytes("data".getBytes)
+  val exampleCRep   = CRepEncoder[ArrayOfBytes].encode(example)
+  val exampleStruct = structInterpreter(exampleCRep)
+  val exampleSchema = schemaInterpreter(exampleCRep)
+  val backToCRep    = cRepInterpreter(exampleSchema, exampleStruct)
+  println {
+    CRepDecoder[ArrayOfBytes].decode(backToCRep).map(a => new String(a.b))
   }
 }
