@@ -4,42 +4,45 @@ import shapeless.{ :+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGene
 import shapeless.labelled.FieldType
 import java.math.{ BigDecimal => JBigDecimal }
 
-trait CRepEncoder[A] {
-  def encode(a: A): CRep
+import connect.CSchemaEncoder.{ convertS, CStructEncoder }
+
+trait CSchemaEncoder[A] {
+  def encode(a: A): CSchema
 }
 
-object CRepEncoder {
+object CSchemaEncoder extends LowPriorityImplicits {
   // This is solely used for encoding case classes
-  private[connect] trait CStructEncoder[A] extends CRepEncoder[A] {
+  private[connect] trait CStructEncoder[A] extends CSchemaEncoder[A] {
     def encode(a: A): CStruct
   }
 
   // summoner
-  def apply[A](implicit C: CRepEncoder[A]): CRepEncoder[A] =
+  def apply[A](implicit C: CSchemaEncoder[A]): CSchemaEncoder[A] =
     C
-  def convert[A](f: A => CRep): CRepEncoder[A] = (a: A) => f(a)
+  def convert[A](f: A => CSchema): CSchemaEncoder[A] = (a: A) => f(a)
 
   def convertS[A](f: A => CStruct): CStructEncoder[A] =
     (a: A) => f(a)
 
-  implicit val bigDecimalEncoder: CRepEncoder[BigDecimal]   = convert(b => CBigDecimal(b.bigDecimal))
-  implicit val jBigDecimalEncoder: CRepEncoder[JBigDecimal] = convert(CBigDecimal)
-  implicit val byteEncoder: CRepEncoder[Byte]               = convert(CInt8)
-  implicit val bytesEncoder: CRepEncoder[Array[Byte]]       = convert(CBytes)
-  implicit val shortEncoder: CRepEncoder[Short]             = convert(CInt16)
-  implicit val intEncoder: CRepEncoder[Int]                 = convert(CInt32)
-  implicit val longEncoder: CRepEncoder[Long]               = convert(CInt64)
-  implicit val charEncoder: CRepEncoder[Char]               = convert(CCh)
-  implicit val floatEncoder: CRepEncoder[Float]             = convert(CFloat32)
-  implicit val doubleEncoder: CRepEncoder[Double]           = convert(CFloat64)
-  implicit val stringEncoder: CRepEncoder[String]           = convert(CStr)
+  implicit def bigDecimalEncoder(scale: Int): CSchemaEncoder[BigDecimal]   = convert(b => CBigDecimal(scale))
+  implicit def jBigDecimalEncoder(scale: Int): CSchemaEncoder[JBigDecimal] = convert(b => CBigDecimal(scale))
+  implicit val byteEncoder: CSchemaEncoder[Byte]                           = convert(_ => CInt8)
+  implicit val bytesEncoder: CSchemaEncoder[Array[Byte]]                   = convert(_ => CBytes)
+  implicit val shortEncoder: CSchemaEncoder[Short]                         = convert(_ => CInt16)
+  implicit val intEncoder: CSchemaEncoder[Int]                             = convert(_ => CInt32)
+  implicit val longEncoder: CSchemaEncoder[Long]                           = convert(_ => CInt64)
+  implicit val charEncoder: CSchemaEncoder[Char]                           = convert(_ => CCh)
+  implicit val floatEncoder: CSchemaEncoder[Float]                         = convert(_ => CFloat32)
+  implicit val doubleEncoder: CSchemaEncoder[Double]                       = convert(_ => CFloat64)
+  implicit val stringEncoder: CSchemaEncoder[String]                       = convert(_ => CStr)
+  implicit def option[A: CSchemaEncoder]: CSchemaEncoder[Option[A]]        = convert(_ => COption(CSchemaEncoder[A].encode(null.asInstanceOf[A])))
 
   implicit val hnilEncoder: CStructEncoder[HNil] = convertS(_ => CStruct(Nil))
 
   implicit def hlistEncoder[K <: Symbol, H, T <: HList](
     implicit
     witness: Witness.Aux[K],
-    hEncoder: Lazy[CRepEncoder[H]],
+    hEncoder: Lazy[CSchemaEncoder[H]],
     tEncoder: CStructEncoder[T]
   ): CStructEncoder[FieldType[K, H] :: T] = convertS {
     case h :: t =>
@@ -62,15 +65,17 @@ object CRepEncoder {
     tEncoder: CStructEncoder[T]
   ): CStructEncoder[FieldType[K, H] :+: T] = convertS {
     case Inl(head) =>
-      val typeName = witness.value.name
       val existing = hEncoder.value.encode(head).underlying
-      val newInfo  = "type" -> CStr(typeName)
+      val newInfo  = "type" -> CStr
       CStruct(newInfo :: existing)
 
     case Inr(tail) =>
       tEncoder.encode(tail)
   }
+}
 
+// See https://stackoverflow.com/questions/1886953/is-there-a-way-to-control-which-implicit-conversion-will-be-the-default-used
+trait LowPriorityImplicits {
   // Given an encoder for the generic representation R, and a conversion from a specific representation A (case class)
   // to a generic representation R (HList) we can obtain an encoder for the specific representation (A)
   implicit def genericEncoder[A, R](
@@ -78,5 +83,7 @@ object CRepEncoder {
     gen: LabelledGeneric.Aux[A, R],
     enc: Lazy[CStructEncoder[R]]
   ): CStructEncoder[A] =
-    convertS(a => enc.value.encode(gen.to(a)))
+    convertS { a =>
+      enc.value.encode(gen.to(a))
+    }
 }
