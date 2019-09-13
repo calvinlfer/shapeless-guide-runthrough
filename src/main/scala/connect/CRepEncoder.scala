@@ -8,7 +8,7 @@ trait CRepEncoder[A] {
   def encode(a: A): CRep
 }
 
-object CRepEncoder {
+object CRepEncoder extends LowPriorityImplicits {
   // This is solely used for encoding case classes
   private[connect] trait CStructEncoder[A] extends CRepEncoder[A] {
     def encode(a: A): CStruct
@@ -33,6 +33,12 @@ object CRepEncoder {
   implicit val floatEncoder: CRepEncoder[Float]             = convert(CFloat32)
   implicit val doubleEncoder: CRepEncoder[Double]           = convert(CFloat64)
   implicit val stringEncoder: CRepEncoder[String]           = convert(CStr)
+  implicit def optionEncoder[A: CRepEncoder]: CRepEncoder[OptionWithDefault[A]] =
+    convert { od: OptionWithDefault[A] =>
+      COpD(
+        OptionWithDefault(od.o.map(a => CRepEncoder[A].encode(a)), CRepEncoder[A].encode(od.default))
+      )
+    }
 
   implicit val hnilEncoder: CStructEncoder[HNil] = convertS(_ => CStruct(Nil))
 
@@ -70,7 +76,10 @@ object CRepEncoder {
     case Inr(tail) =>
       tEncoder.encode(tail)
   }
+}
 
+trait LowPriorityImplicits {
+  import connect.CRepEncoder.{ convertS, CStructEncoder }
   // Given an encoder for the generic representation R, and a conversion from a specific representation A (case class)
   // to a generic representation R (HList) we can obtain an encoder for the specific representation (A)
   implicit def genericEncoder[A, R](

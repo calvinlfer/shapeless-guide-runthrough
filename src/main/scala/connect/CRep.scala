@@ -3,6 +3,8 @@ import java.math.{ BigDecimal => JBigDecimal }
 
 import org.apache.kafka.connect.data._
 
+case class OptionWithDefault[A](o: Option[A], default: A)
+
 /**
  * CRep is our own intermediate well-typed combined representation of Kafka Connect's Schema and Struct which carries
  * around all the information we need to derive both pieces of Kafka Connect information.
@@ -23,61 +25,120 @@ final case class CStr(s: String)                           extends CRep
 final case class CBool(b: Boolean)                         extends CRep
 final case class CBigDecimal(b: JBigDecimal)               extends CRep
 final case class CStruct(underlying: List[(String, CRep)]) extends CRep
+final case class COpD(underlying: OptionWithDefault[CRep]) extends CRep
 
 object CRep {
   import scala.jdk.CollectionConverters._
-  import org.apache.kafka.connect.data.Schema._
 
-  def schemaInterpreter(c: CRep): Schema =
-    c match {
-      case _: CBool       => BOOLEAN_SCHEMA
-      case _: CInt8       => INT8_SCHEMA
-      case _: CBytes      => BYTES_SCHEMA
-      case _: CInt16      => INT16_SCHEMA
-      case CInt32(_)      => INT32_SCHEMA
-      case CInt64(_)      => INT64_SCHEMA
-      case CFloat32(_)    => FLOAT32_SCHEMA
-      case CFloat64(_)    => FLOAT64_SCHEMA
-      case CStr(_)        => STRING_SCHEMA
-      case CCh(_)         => STRING_SCHEMA
-      case CBigDecimal(b) => Decimal.builder(b.scale).build() // dynamically build out the schema using the BigDecimal
-      case CStruct(underlying) =>
-        underlying
-          .foldLeft(SchemaBuilder.struct()) {
-            case (acc, (fieldName, fieldSchema)) =>
-              acc.field(fieldName, schemaInterpreter(fieldSchema))
-          }
-          .build()
-    }
+  def schemaInterpreter(c: CRep): Schema = {
+    def go(c: CRep): SchemaBuilder =
+      c match {
+        case _: CBool       => SchemaBuilder.bool()
+        case _: CInt8       => SchemaBuilder.int8()
+        case _: CBytes      => SchemaBuilder.bytes()
+        case _: CInt16      => SchemaBuilder.int16()
+        case CInt32(_)      => SchemaBuilder.int32()
+        case CInt64(_)      => SchemaBuilder.int64()
+        case CFloat32(_)    => SchemaBuilder.float32()
+        case CFloat64(_)    => SchemaBuilder.float64()
+        case CStr(_)        => SchemaBuilder.string()
+        case CCh(_)         => SchemaBuilder.string()
+        case COpD(o)        => go(o.default).optional()
+        case CBigDecimal(b) => Decimal.builder(b.scale) // dynamically build out the schema using the BigDecimal
+        case CStruct(underlying) =>
+          underlying
+            .foldLeft(SchemaBuilder.struct()) {
+              case (acc, (fieldName, fieldSchema)) =>
+                acc.field(fieldName, go(fieldSchema).build())
+            }
+      }
+    go(c).build()
+  }
 
-  def structInterpreter(c: CRep): Struct = {
+  def struct(c: CRep): Struct = {
     val schema = schemaInterpreter(c)
-
-    def go(c: CRep): Struct =
+    def go(c: CRep, schema: Schema): Struct = {
+      val struct = new Struct(schema)
       c match {
         case CStruct(underlying) =>
-          underlying.foldLeft(new Struct(schema)) {
-            case (acc, (fieldName, fieldSchema)) =>
-              val unsafe: Any = fieldSchema match {
-                case CBool(x)       => x
-                case CInt8(x)       => x
-                case CBytes(x)      => x
-                case CInt16(x)      => x
-                case CInt32(x)      => x
-                case CInt64(x)      => x
-                case CFloat32(x)    => x
-                case CFloat64(x)    => x
-                case CStr(x)        => x
-                case CCh(x)         => x
-                case CBigDecimal(x) => x
-                case c @ CStruct(_) => structInterpreter(c)
+          underlying.foreach {
+            case (fieldName, fieldSchema) =>
+              fieldSchema match {
+                // primitive types
+                case CBool(x)       => struct.put(fieldName, x)
+                case CInt8(x)       => struct.put(fieldName, x)
+                case CBytes(x)      => struct.put(fieldName, x)
+                case CInt16(x)      => struct.put(fieldName, x)
+                case CInt32(x)      => struct.put(fieldName, x)
+                case CInt64(x)      => struct.put(fieldName, x)
+                case CFloat32(x)    => struct.put(fieldName, x)
+                case CFloat64(x)    => struct.put(fieldName, x)
+                case CStr(x)        => struct.put(fieldName, x)
+                case CCh(x)         => struct.put(fieldName, x)
+                case CBigDecimal(x) => struct.put(fieldName, x)
+
+                // more complicated types
+                case c: CStruct =>
+                  go(c, schema.field(fieldName).schema())
+
+                case COpD(OptionWithDefault(o, _)) =>
+                  val wtf = o.map {
+                    case CBool(x)       => x
+                    case CInt8(x)       => x
+                    case CBytes(x)      => x
+                    case CInt16(x)      => x
+                    case CInt32(x)      => x
+                    case CInt64(x)      => x
+                    case CFloat32(x)    => x
+                    case CFloat64(x)    => x
+                    case CStr(x)        => x
+                    case CCh(x)         => x
+                    case CBigDecimal(x) => x
+                    case c: CStruct     => go(c, schema.field(fieldName).schema())
+                    case c: COpD        => go(c, schema)
+                  }.orNull
+                  struct.put(fieldName, wtf)
               }
-              acc.put(fieldName, unsafe)
           }
-        case _ => new Struct(schema)
       }
-    go(c)
+      struct
+    }
+    go(c, schema)
   }
+
+//  def structInterpreter(c: CRep): Struct = {
+//    val schema = schemaInterpreter(c)
+//
+//    def go(c: CRep, schema: Schema): Struct =
+//      c match {
+//        case CStruct(underlying) =>
+//          underlying.foldLeft(new Struct(schema)) {
+//            case (acc, (fieldName, fieldSchema)) =>
+//              val unsafe: Any = fieldSchema match {
+//                case CBool(x)       => x
+//                case CInt8(x)       => x
+//                case CBytes(x)      => x
+//                case CInt16(x)      => x
+//                case CInt32(x)      => x
+//                case CInt64(x)      => x
+//                case CFloat32(x)    => x
+//                case CFloat64(x)    => x
+//                case CStr(x)        => x
+//                case CCh(x)         => x
+//                case CBigDecimal(x) => x
+//                case COpD(u)        => u.o.map(cRep => go(cRep, schema)).orNull
+//                case c @ CStruct(_) => structInterpreter(c)
+//              }
+//              println(s"expecting to put in ${schema.fields}")
+//              println(s"trying to put $fieldName in")
+//              println(s"Status of trying to do this: ${schema.field(fieldName)}")
+//              println(s"Putting in $unsafe")
+//              acc.put(fieldName, unsafe)
+//          }
+//        case _ => new Struct(schema)
+//      }
+//    go(c, schema)
+//  }
 
   import org.apache.kafka.connect.data.Schema.Type._
   def cRepInterpreter(s: Schema, st: Struct): CStruct =

@@ -1,10 +1,10 @@
 package connect
 
-import shapeless.{ :+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGeneric, Lazy, Witness }
-import shapeless.labelled.{ field, FieldType }
 import java.math.{ BigDecimal => JBigDecimal }
 
-import CRepDecoder.Error
+import connect.CRepDecoder.Error
+import shapeless.labelled.{ field, FieldType }
+import shapeless.{ :+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGeneric, Lazy, Witness }
 
 trait CRepDecoder[A] {
   def decode(c: CRep): Either[Error, A]
@@ -59,6 +59,19 @@ object CRepDecoder {
     case e         => Left(Error(s"cannot convert $e to Array[Byte]"))
   }
 
+  implicit def optionDecoder[A](implicit C: CRepDecoder[A]): CRepDecoder[OptionWithDefault[A]] = convertBack {
+    case COpD(underlying) =>
+      C.decode(underlying.default).flatMap { defaultA =>
+        underlying.o.map(rep => C.decode(rep)) match {
+          case Some(Right(a)) => Right(OptionWithDefault(Some(a), defaultA))
+          case Some(Left(b))  => Left(b)
+          case None           => Right(OptionWithDefault(None, defaultA))
+        }
+      }
+
+    case e => Left(Error(s"cannot convert $e to Array[Byte]"))
+  }
+
   implicit val hnilEncoder: CStructDecoder[HNil] = convertBackS(_ => Right(HNil))
 
   implicit def hlistEncoder[K <: Symbol, H, T <: HList](
@@ -110,6 +123,10 @@ object CRepDecoder {
         Left(Error(s"Expected to have a type -> CStr(subtypeName) but got type -> $bad instead"))
     }
   }
+}
+
+trait LowPriority {
+  import CRepDecoder.{ convertBackS, CStructDecoder }
 
   implicit def genericDecoder[A, R](
     implicit
