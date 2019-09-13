@@ -14,25 +14,35 @@ object KafkaConnectExample extends App {
     }
   }
 
-  case class Book(name: String, pages: Int, color: String, `type`: String)
-  case class Student(name: String, id: Int, book: Book, tag: BigDecimal)
+  val circleRep = CRepEncoder[Shape].encode(Circle(10))
   println {
-    structInterpreter {
-      CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), BigDecimal(102, 2)))
+    CRepDecoder[Shape].decode {
+      cSchemaInterpreter(
+        s = schemaInterpreter(circleRep),
+        st = structInterpreter(circleRep)
+      )
     }
   }
 
-  val cSchema = CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), JBigDecimal.valueOf(102, 2)))
-  println {
-    CRepDecoder[Student].decode(cSchema)
-  }
-
-  println {
-    cSchemaInterpreter(
-      schemaInterpreter(cSchema): Schema,
-      structInterpreter {
-        CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), JBigDecimal.valueOf(102, 2)))
-      }: Struct
-    )
-  }
+//  case class Book(name: String, pages: Int, color: String, `type`: String)
+//  case class Student(name: String, id: Int, book: Book, tag: BigDecimal)
+//  println {
+//    structInterpreter {
+//      CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), BigDecimal(102, 2)))
+//    }
+//  }
+//
+//  val cSchema = CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), JBigDecimal.valueOf(102, 2)))
+//  println {
+//    CRepDecoder[Student].decode(cSchema)
+//  }
+//
+//  println {
+//    cSchemaInterpreter(
+//      schemaInterpreter(cSchema): Schema,
+//      structInterpreter {
+//        CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), JBigDecimal.valueOf(102, 2)))
+//      }: Struct
+//    )
+//  }
 }
