@@ -88,8 +88,13 @@ object CRepDecoder {
     hEncoder: Lazy[CStructDecoder[H]],
     tEncoder: CStructDecoder[T]
   ): CStructDecoder[FieldType[K, H] :+: T] = convertBackS { cStruct =>
-    val typeExistence = cStruct.underlying.find(_._1 == "type").getOrElse(throw new Exception("There is no `type` field so there is not enough information to decode this"))
-    typeExistence match {
+    val typeExistenceEither =
+      cStruct.underlying
+        .find(_._1 == "type")
+        .fold[Either[Error, (String, CRep)]](ifEmpty = Left(Error("There is no `type` field so there is not enough information to decode this")))(
+          e => Right(e)
+        )
+    typeExistenceEither.flatMap {
       case (_, CStr(subtypeName)) =>
         if (subTypeWitness.value.name == subtypeName)
           hEncoder.value.decodeS(cStruct).map(h => Inl(field[K](h)))
