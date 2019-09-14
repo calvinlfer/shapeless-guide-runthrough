@@ -55,4 +55,11 @@ object KafkaConnectExample extends App {
   println {
     CRepDecoder[ArrayOfBytes].decode(backToCRep).map(a => new String(a.b))
   }
+
+  implicit val os: CRepEncoder[Option[Circle]] = CRepEncoder.optionEncoder(Circle(0.0))
+  case class Example(a: Int, b: Option[Circle])
+  val encoded = CRepEncoder[Example].encode(Example(1, None))
+  println {
+    CRepDecoder[Example].decode(encoded)
+  }
 }

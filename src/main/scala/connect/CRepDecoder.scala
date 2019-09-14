@@ -4,13 +4,13 @@ import shapeless.{ :+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGene
 import shapeless.labelled.{ field, FieldType }
 import java.math.{ BigDecimal => JBigDecimal }
 
-import CRepDecoder.Error
+import CRepDecoder.{ convertBackS, CStructDecoder, Error }
 
 trait CRepDecoder[A] {
   def decode(c: CRep): Either[Error, A]
 }
 
-object CRepDecoder {
+object CRepDecoder extends LowPriorityDecoder {
   case class Error(message: String)
 
   // This is solely used for decoding CStructs
@@ -57,6 +57,23 @@ object CRepDecoder {
   implicit val byteArrayDecoder: CRepDecoder[Array[Byte]] = convertBack {
     case CBytes(a) => Right(a)
     case e         => Left(Error(s"cannot convert $e to Array[Byte]"))
+  }
+
+  implicit def optionDecoder[A](implicit A: CRepDecoder[A]): CRepDecoder[Option[A]] = convertBack {
+    case CStruct(u) =>
+      val eitherOptCRep = for {
+        _         <- u.find(_._1 == "__type").collect { case (_, CStr("Option")) => () }.toRight(Error("Unable to find type on CStruct when decoding Option"))
+        cRep      <- u.find(_._1 == "__value").map(_._2).toRight(Error("Unable to obtain value"))
+        fixedCRep <- if (cRep == null) Right(None) else Right(Some(cRep))
+        _         <- u.find(_._1 == "__default").toRight(Error("No default provided"))
+      } yield fixedCRep
+
+      eitherOptCRep.flatMap {
+        case Some(x) => A.decode(x).map(Option(_))
+        case None    => Right(None)
+      }
+
+    case e => Left(Error(s"cannot convert $e to Option[A]"))
   }
 
   implicit val hnilEncoder: CStructDecoder[HNil] = convertBackS(_ => Right(HNil))
@@ -110,7 +127,9 @@ object CRepDecoder {
         Left(Error(s"Expected to have a type -> CStr(subtypeName) but got type -> $bad instead"))
     }
   }
+}
 
+trait LowPriorityDecoder {
   implicit def genericDecoder[A, R](
     implicit
     gen: LabelledGeneric.Aux[A, R],
