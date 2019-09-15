@@ -3,6 +3,7 @@ import java.math.{ BigDecimal => JBigDecimal }
 
 import connect._
 import connect.CRep._
+import shapeless.{ <:!<, Refute }
 
 object KafkaConnectExample extends App {
   sealed trait Shape
@@ -62,4 +63,10 @@ object KafkaConnectExample extends App {
   println {
     CRepDecoder[Example].decode(encoded)
   }
+
+//  def lol[A](x: A)(
+//    implicit
+//    evidence: A <:!< Option[_]
+//  ): A = x
+//  lol(1)
 }

@@ -1,6 +1,6 @@
 package connect
 
-import shapeless.{ :+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGeneric, Lazy, Witness }
+import shapeless.{ :+:, ::, <:!<, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGeneric, Lazy, Witness }
 import shapeless.labelled.FieldType
 import java.math.{ BigDecimal => JBigDecimal }
 
@@ -88,7 +88,8 @@ trait LowPriorityEncoder {
   implicit def genericEncoder[A, R](
     implicit
     gen: LabelledGeneric.Aux[A, R],
-    enc: Lazy[CStructEncoder[R]]
+    enc: Lazy[CStructEncoder[R]],
+    evidenceANotOption: A <:!< Option[_]
   ): CStructEncoder[A] =
     convertS(a => enc.value.encode(gen.to(a)))
 }
