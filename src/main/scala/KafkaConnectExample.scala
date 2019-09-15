@@ -1,9 +1,8 @@
-import org.apache.kafka.connect.data._
 import java.math.{ BigDecimal => JBigDecimal }
 
-import connect._
 import connect.CRep._
-import shapeless.{ <:!<, Refute }
+import connect._
+import org.apache.kafka.connect.data._
 
 object KafkaConnectExample extends App {
   sealed trait Shape
