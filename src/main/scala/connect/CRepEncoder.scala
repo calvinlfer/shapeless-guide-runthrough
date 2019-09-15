@@ -4,11 +4,14 @@ import shapeless.{ :+:, ::, <:!<, CNil, Coproduct, HList, HNil, Inl, Inr, Labell
 import shapeless.labelled.FieldType
 import java.math.{ BigDecimal => JBigDecimal }
 
+import scala.annotation.implicitNotFound
+
+@implicitNotFound("Could not find an implicit value for ${A}. If ${A} is a case class then make sure it's fields have typeclass instances")
 trait CRepEncoder[A] {
   def encode(a: A): CRep
 }
 
-object CRepEncoder extends LowPriorityEncoder {
+object CRepEncoder {
   // This is solely used for encoding case classes
   private[connect] trait CStructEncoder[A] extends CRepEncoder[A] {
     def encode(a: A): CStruct
@@ -79,10 +82,7 @@ object CRepEncoder extends LowPriorityEncoder {
     case Inr(tail) =>
       tEncoder.encode(tail)
   }
-}
 
-trait LowPriorityEncoder {
-  import connect.CRepEncoder.{ convertS, CStructEncoder }
   // Given an encoder for the generic representation R, and a conversion from a specific representation A (case class)
   // to a generic representation R (HList) we can obtain an encoder for the specific representation (A)
   implicit def genericEncoder[A, R](
