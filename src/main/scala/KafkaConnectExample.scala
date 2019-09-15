@@ -63,10 +63,4 @@ object KafkaConnectExample extends App {
   println {
     CRepDecoder[Example].decode(encoded)
   }
-
-//  def lol[A](x: A)(
-//    implicit
-//    evidence: A <:!< Option[_]
-//  ): A = x
-//  lol(1)
 }
