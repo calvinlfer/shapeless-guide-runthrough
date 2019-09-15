@@ -60,18 +60,8 @@ object CRepDecoder extends LowPriorityDecoder {
   }
 
   implicit def optionDecoder[A](implicit A: CRepDecoder[A]): CRepDecoder[Option[A]] = convertBack {
-    case CStruct(u) =>
-      val eitherOptCRep = for {
-        _         <- u.find(_._1 == "__type").collect { case (_, CStr("Option")) => () }.toRight(Error("Unable to find type on CStruct when decoding Option"))
-        cRep      <- u.find(_._1 == "__value").map(_._2).toRight(Error("Unable to obtain value"))
-        fixedCRep <- if (cRep == null) Right(None) else Right(Some(cRep))
-        _         <- u.find(_._1 == "__default").toRight(Error("No default provided"))
-      } yield fixedCRep
-
-      eitherOptCRep.flatMap {
-        case Some(x) => A.decode(x).map(Option(_))
-        case None    => Right(None)
-      }
+    case COption(value, _) =>
+      value.map(A.decode).fold[Either[Error, Option[A]]](ifEmpty = Right(None))(e => e.map(Option(_)))
 
     case e => Left(Error(s"cannot convert $e to Option[A]"))
   }

@@ -58,8 +58,10 @@ object KafkaConnectExample extends App {
 
   implicit val os: CRepEncoder[Option[Circle]] = CRepEncoder.optionEncoder(Circle(0.0))
   case class Example(a: Int, b: Option[Circle])
-  val encoded = CRepEncoder[Example].encode(Example(1, None))
-  println {
-    CRepDecoder[Example].decode(encoded)
-  }
+  val encoded = CRepEncoder[Example].encode(Example(1, Some(Circle(10.0))))
+  println(structInterpreter(encoded))
+  println(cRepInterpreter(schemaInterpreter(encoded), structInterpreter(encoded)))
+//  println {
+//    CRepDecoder[Example].decode(encoded)
+//  }
 }

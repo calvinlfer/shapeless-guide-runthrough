@@ -37,13 +37,8 @@ object CRepEncoder {
   implicit val doubleEncoder: CRepEncoder[Double]           = convert(CFloat64)
   implicit val stringEncoder: CRepEncoder[String]           = convert(CStr)
 
-  def optionEncoder[A: CRepEncoder](default: A): CRepEncoder[Option[A]] = convertS { optA =>
-    CStruct(
-      "__type"      -> CStr("Option") ::
-        "__value"   -> optA.map(CRepEncoder[A].encode).orNull ::
-        "__default" -> CRepEncoder[A].encode(default) ::
-        Nil
-    )
+  def optionEncoder[A: CRepEncoder](default: A): CRepEncoder[Option[A]] = convert { optA =>
+    COption(optA.map(CRepEncoder[A].encode), CRepEncoder[A].encode(default))
   }
 
   implicit val hnilEncoder: CStructEncoder[HNil] = convertS(_ => CStruct(Nil))
