@@ -115,6 +115,44 @@ object CRep {
   }
 
   import org.apache.kafka.connect.data.Schema.Type._
+  def simpleCRep(s: Schema, name: String, st: Struct): CRep =
+    s.`type`() match {
+      case STRUCT  => cRepInterpreter(s, st.getStruct(name))
+      case STRING  => CStr(st.getString(name))
+      case INT8    => CInt8(st.getInt8(name))
+      case INT16   => CInt16(st.getInt16(name))
+      case INT32   => CInt32(st.getInt32(name))
+      case INT64   => CInt64(st.getInt64(name))
+      case FLOAT32 => CFloat32(st.getFloat32(name))
+      case FLOAT64 => CFloat64(st.getFloat64(name))
+      case BYTES =>
+        val name = s.name()
+        name match {
+          case Decimal.LOGICAL_NAME =>
+            // doing it via getBytes and Decimal.toLogical doesn't seem to work :(
+            val bd = st.get(name).asInstanceOf[java.math.BigDecimal]
+            CBigDecimal(bd)
+
+          case _ =>
+            val bytes = st.getBytes(name)
+            CBytes(bytes)
+        }
+    }
+
+  def cStructOptimize(c: CStruct): CRep = {
+    val map = c.underlying.toMap
+    map.get(OptionTypeKey) match {
+      case Some(v) if v == CStr(OptionTypeValue) =>
+        // Optional data
+        COption(map.get(OptionValueKey), map(OptionDefaultKey))
+      case _ =>
+        CStruct(c.underlying.map {
+          case (str, y: CStruct) => (str, cStructOptimize(y))
+          case other             => other
+        })
+    }
+  }
+
   def cRepInterpreter(s: Schema, st: Struct): CStruct =
     s.fields()
       .asScala
@@ -128,7 +166,35 @@ object CRep {
 
           case STRUCT =>
             // handle option
-            cRepInterpreter(schema, st.getStruct(fieldName))
+            val structComponentsMap = schema.fields().asScala.toList.map(f => (f.name(), f)).toMap
+            val specialTypePresent  = structComponentsMap.get(OptionTypeKey).filter(_.schema() == STRING_SCHEMA)
+            specialTypePresent match {
+              case Some(_) =>
+                val specialType = st.getStruct(fieldName).getString(OptionTypeKey)
+                if (specialType == OptionTypeValue) {
+                  val w = CStruct(
+                    (fieldName,
+                     CStruct(
+                       st.getStruct(fieldName)
+                         .schema()
+                         .fields()
+                         .asScala
+                         .map { f =>
+                           (f.name(), simpleCRep(f.schema(), f.name(), st.getStruct(fieldName)))
+                         }
+                         .foldLeft(List.empty[(String, CRep)]) { case (acc, next) => next :: acc }
+                     )) :: Nil
+                  )
+                  w
+                } else {
+                  // not sure what this is so I'll just use the default struct
+                  cRepInterpreter(schema, st.getStruct(fieldName))
+                }
+
+              case None =>
+                // not an Option
+                cRepInterpreter(schema, st.getStruct(fieldName))
+            }
 
           case INT8 =>
             CStruct((fieldName, CInt8(st.getInt8(fieldName))) :: Nil)

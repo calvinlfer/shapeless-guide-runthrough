@@ -24,26 +24,18 @@ object KafkaConnectExample extends App {
     }
   }
 
-  case class Book(name: String, pages: Int, color: String, `type`: String)
+  case class Haha(something: Int)
+  case class Book(name: String, pages: Int, color: String, `type`: String, lol: Haha)
   case class Student(name: String, id: Int, book: Book, tag: BigDecimal)
   println {
     structInterpreter {
-      CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), BigDecimal(102, 2)))
+      CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover", Haha(1)), BigDecimal(102, 2)))
     }
   }
 
-  val cSchema = CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), JBigDecimal.valueOf(102, 2)))
+  val cSchema = CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover", Haha(2)), JBigDecimal.valueOf(102, 2)))
   println {
     CRepDecoder[Student].decode(cSchema)
-  }
-
-  println {
-    cRepInterpreter(
-      schemaInterpreter(cSchema): Schema,
-      structInterpreter {
-        CRepEncoder[Student].encode(Student("calvin", 1, Book("Category Theory", 367, "Blue", "Soft-cover"), JBigDecimal.valueOf(102, 2)))
-      }: Struct
-    )
   }
 
   case class ArrayOfBytes(b: Array[Byte])
@@ -60,8 +52,9 @@ object KafkaConnectExample extends App {
   case class Example(a: Int, b: Option[Circle])
   val encoded = CRepEncoder[Example].encode(Example(1, Some(Circle(10.0))))
   println(structInterpreter(encoded))
-  println(cRepInterpreter(schemaInterpreter(encoded), structInterpreter(encoded)))
-//  println {
-//    CRepDecoder[Example].decode(encoded)
-//  }
+  println(structInterpreter {
+    cStructOptimize {
+      cRepInterpreter(schemaInterpreter(encoded), structInterpreter(encoded))
+    }
+  })
 }
