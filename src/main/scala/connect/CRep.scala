@@ -172,18 +172,22 @@ object CRep {
               case Some(_) =>
                 val specialType = st.getStruct(fieldName).getString(OptionTypeKey)
                 if (specialType == OptionTypeValue) {
+                  val optimized =
+                    cStructOptimize {
+                      CStruct(
+                        st.getStruct(fieldName)
+                          .schema()
+                          .fields()
+                          .asScala
+                          .map { f =>
+                            (f.name(), simpleCRep(f.schema(), f.name(), st.getStruct(fieldName)))
+                          }
+                          .foldLeft(List.empty[(String, CRep)]) { case (acc, next) => next :: acc }
+                      )
+                    }
+
                   val w = CStruct(
-                    (fieldName,
-                     CStruct(
-                       st.getStruct(fieldName)
-                         .schema()
-                         .fields()
-                         .asScala
-                         .map { f =>
-                           (f.name(), simpleCRep(f.schema(), f.name(), st.getStruct(fieldName)))
-                         }
-                         .foldLeft(List.empty[(String, CRep)]) { case (acc, next) => next :: acc }
-                     )) :: Nil
+                    (fieldName, optimized) :: Nil
                   )
                   w
                 } else {

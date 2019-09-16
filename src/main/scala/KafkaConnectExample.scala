@@ -52,9 +52,14 @@ object KafkaConnectExample extends App {
   case class Example(a: Int, b: Option[Circle])
   val encoded = CRepEncoder[Example].encode(Example(1, Some(Circle(10.0))))
   println(structInterpreter(encoded))
-  println(structInterpreter {
-    cStructOptimize {
+  println(
+    structInterpreter {
       cRepInterpreter(schemaInterpreter(encoded), structInterpreter(encoded))
     }
-  })
+  )
+
+  val reEncoded = cRepInterpreter(schemaInterpreter(encoded), structInterpreter(encoded))
+  println {
+    CRepDecoder[Example].decode(reEncoded)
+  }
 }
