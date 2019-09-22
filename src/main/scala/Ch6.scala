@@ -1,5 +1,7 @@
-import shapeless._
+import cats.Monoid
 import shapeless.ops.hlist._
+import shapeless.labelled.{ field, FieldType }
+import cats.instances.all._
 
 object Ch6 extends App {
 
@@ -46,6 +48,26 @@ object Ch6 extends App {
   println(Penultimate[Example].apply(example))                             // 3.0
   println(Penultimate[String :: Double :: HNil].apply("1" :: 2.0 :: HNil)) // "1"
 
+  def createMonoid[A](zero: A)(add: (A, A) => A): Monoid[A] =
+    new Monoid[A] {
+      override def empty: A = zero
+
+      override def combine(x: A, y: A): A = add(x, y)
+    }
+
+  implicit val hnilMonoid: Monoid[HNil] =
+    createMonoid[HNil](HNil)((_, _) => HNil)
+
+  implicit def emptyHList[K <: Symbol, H, T <: HList](
+    implicit
+    hMonoid: Lazy[Monoid[H]],
+    tMonoid: Monoid[T]
+  ): Monoid[FieldType[K, H] :: T] =
+    createMonoid(field[K](hMonoid.value.empty) :: tMonoid.empty) { (x, y) =>
+      field[K](hMonoid.value.combine(x.head, y.head)) ::
+        tMonoid.combine(x.tail, y.tail)
+    }
+
   trait Migration[A, B] {
     def apply(a: A): B
   }
@@ -54,17 +76,25 @@ object Ch6 extends App {
     def migrateTo[B](implicit m: Migration[A, B]): B = m(a)
   }
 
-  implicit def genericMigration[A, B, ARep <: HList, BRep <: HList, Unaligned <: HList](
+  implicit def genericMigration[
+    A, B,
+    ARep <: HList, BRep <: HList,
+    Common <: HList, Added <: HList, Unaligned <: HList
+  ](
     implicit
-    aGen: LabelledGeneric.Aux[A, ARep],
-    bGen: LabelledGeneric.Aux[B, BRep],
-    intersection: Intersection.Aux[ARep, BRep, Unaligned],
-    align: Align[Unaligned, BRep]
+    aGen: LabelledGeneric.Aux[A, ARep],                 // 1. proof that we can convert A to/from generic rep (ARep)
+    bGen: LabelledGeneric.Aux[B, BRep],                 // 2. proof that we can convert B to/from generic rep (BRep)
+    intersection: Intersection.Aux[ARep, BRep, Common], // 3. what fields are the same between ARep and BRep, the output is Common
+    difference: Diff.Aux[BRep, Common, Added],          // 4. what fields are different between BRep and Common, the output is Added
+    monoid: Monoid[Added],                              // 5. we need default values for Added since B does not have them but A does
+    prepend: Prepend.Aux[Added, Common, Unaligned],     // 6. Add on the extra fields to the Common data type, the output is Unaligned
+    align: Align[Unaligned, BRep]                       // 7. Align fields so we can get it into B's generic representation
   ): Migration[A, B] = (a: A) => {
-    val aRep = aGen.to(a)
-    val bRep = intersection.apply(aRep)
-    val alignedBRep = align.apply(bRep)
-    val b = bGen.from(alignedBRep)
+    val aRep        = aGen.to(a)
+    val common      = intersection.apply(aRep)
+    val unaligned   = prepend.apply(monoid.empty, common)
+    val alignedBRep = align.apply(unaligned)
+    val b           = bGen.from(alignedBRep)
     b
   }
 
@@ -77,8 +107,7 @@ object Ch6 extends App {
   case class IceCreamV2b(name: String, inCone: Boolean, numCherries: Int)
 
   // Insert fields (provided we can determine a default value):
-  case class IceCreamV2c(
-                          name: String, inCone: Boolean, numCherries: Int, numWaffles: Int)
+  case class IceCreamV2c(name: String, inCone: Boolean, numCherries: Int, numWaffles: Int)
 
   println {
     IceCreamV1("Sundae", 1, false).migrateTo[IceCreamV2a]
@@ -88,6 +117,11 @@ object Ch6 extends App {
 
   println {
     IceCreamV1("Sundae", 1, true).migrateTo[IceCreamV2b]
+  }
+
+  // Add new fields
+  println {
+    IceCreamV1("Sundae", 1, true).migrateTo[IceCreamV2c]
   }
 
 }
