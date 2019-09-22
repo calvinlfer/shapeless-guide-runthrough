@@ -54,15 +54,17 @@ object Ch6 extends App {
     def migrateTo[B](implicit m: Migration[A, B]): B = m(a)
   }
 
-  implicit def genericMigration[A, B, ARep <: HList, BRep <: HList](
+  implicit def genericMigration[A, B, ARep <: HList, BRep <: HList, Unaligned <: HList](
     implicit
     aGen: LabelledGeneric.Aux[A, ARep],
     bGen: LabelledGeneric.Aux[B, BRep],
-    intersection: Intersection.Aux[ARep, BRep, BRep]
+    intersection: Intersection.Aux[ARep, BRep, Unaligned],
+    align: Align[Unaligned, BRep]
   ): Migration[A, B] = (a: A) => {
     val aRep = aGen.to(a)
     val bRep = intersection.apply(aRep)
-    val b = bGen.from(bRep)
+    val alignedBRep = align.apply(bRep)
+    val b = bGen.from(alignedBRep)
     b
   }
 
@@ -71,8 +73,21 @@ object Ch6 extends App {
   // Remove fields
   case class IceCreamV2a(name: String, inCone: Boolean)
 
+  // Reorder fields:
+  case class IceCreamV2b(name: String, inCone: Boolean, numCherries: Int)
+
+  // Insert fields (provided we can determine a default value):
+  case class IceCreamV2c(
+                          name: String, inCone: Boolean, numCherries: Int, numWaffles: Int)
+
   println {
     IceCreamV1("Sundae", 1, false).migrateTo[IceCreamV2a]
+  }
+
+  // Reorder fields
+
+  println {
+    IceCreamV1("Sundae", 1, true).migrateTo[IceCreamV2b]
   }
 
 }
