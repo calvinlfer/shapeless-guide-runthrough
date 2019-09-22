@@ -1,4 +1,5 @@
-import shapeless.ops.hlist.{ Init, Last }
+import shapeless._
+import shapeless.ops.hlist._
 
 object Ch6 extends App {
 
@@ -44,4 +45,34 @@ object Ch6 extends App {
   val example: Example = 1 :: "two" :: 3.0 :: "Four" :: HNil
   println(Penultimate[Example].apply(example))                             // 3.0
   println(Penultimate[String :: Double :: HNil].apply("1" :: 2.0 :: HNil)) // "1"
+
+  trait Migration[A, B] {
+    def apply(a: A): B
+  }
+
+  implicit class MigrationOps[A](a: A) {
+    def migrateTo[B](implicit m: Migration[A, B]): B = m(a)
+  }
+
+  implicit def genericMigration[A, B, ARep <: HList, BRep <: HList](
+    implicit
+    aGen: LabelledGeneric.Aux[A, ARep],
+    bGen: LabelledGeneric.Aux[B, BRep],
+    intersection: Intersection.Aux[ARep, BRep, BRep]
+  ): Migration[A, B] = (a: A) => {
+    val aRep = aGen.to(a)
+    val bRep = intersection.apply(aRep)
+    val b = bGen.from(bRep)
+    b
+  }
+
+  case class IceCreamV1(name: String, numCherries: Int, inCone: Boolean)
+
+  // Remove fields
+  case class IceCreamV2a(name: String, inCone: Boolean)
+
+  println {
+    IceCreamV1("Sundae", 1, false).migrateTo[IceCreamV2a]
+  }
+
 }
