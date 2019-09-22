@@ -4,13 +4,13 @@ import shapeless.{ :+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGene
 import shapeless.labelled.{ field, FieldType }
 import java.math.{ BigDecimal => JBigDecimal }
 
-import CRepDecoder.Error
+import CRepDecoder.{ convertBackS, CStructDecoder, Error }
 
 trait CRepDecoder[A] {
   def decode(c: CRep): Either[Error, A]
 }
 
-object CRepDecoder {
+object CRepDecoder extends LowPriorityDecoder {
   case class Error(message: String)
 
   // This is solely used for decoding CStructs
@@ -57,6 +57,13 @@ object CRepDecoder {
   implicit val byteArrayDecoder: CRepDecoder[Array[Byte]] = convertBack {
     case CBytes(a) => Right(a)
     case e         => Left(Error(s"cannot convert $e to Array[Byte]"))
+  }
+
+  implicit def optionDecoder[A](implicit A: CRepDecoder[A]): CRepDecoder[Option[A]] = convertBack {
+    case COption(value, _) =>
+      value.map(A.decode).fold[Either[Error, Option[A]]](ifEmpty = Right(None))(e => e.map(Option(_)))
+
+    case e => Left(Error(s"cannot convert $e to Option[A]"))
   }
 
   implicit val hnilEncoder: CStructDecoder[HNil] = convertBackS(_ => Right(HNil))
@@ -110,7 +117,9 @@ object CRepDecoder {
         Left(Error(s"Expected to have a type -> CStr(subtypeName) but got type -> $bad instead"))
     }
   }
+}
 
+trait LowPriorityDecoder {
   implicit def genericDecoder[A, R](
     implicit
     gen: LabelledGeneric.Aux[A, R],

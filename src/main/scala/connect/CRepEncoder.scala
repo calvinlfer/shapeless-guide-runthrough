@@ -1,9 +1,12 @@
 package connect
 
-import shapeless.{ :+:, ::, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGeneric, Lazy, Witness }
+import shapeless.{ :+:, ::, <:!<, CNil, Coproduct, HList, HNil, Inl, Inr, LabelledGeneric, Lazy, Witness }
 import shapeless.labelled.FieldType
 import java.math.{ BigDecimal => JBigDecimal }
 
+import scala.annotation.implicitNotFound
+
+@implicitNotFound("Could not find an implicit value for ${A}. If ${A} is a case class then make sure it's fields have typeclass instances")
 trait CRepEncoder[A] {
   def encode(a: A): CRep
 }
@@ -33,6 +36,10 @@ object CRepEncoder {
   implicit val floatEncoder: CRepEncoder[Float]             = convert(CFloat32)
   implicit val doubleEncoder: CRepEncoder[Double]           = convert(CFloat64)
   implicit val stringEncoder: CRepEncoder[String]           = convert(CStr)
+
+  def optionEncoder[A: CRepEncoder](default: A): CRepEncoder[Option[A]] = convert { optA =>
+    COption(optA.map(CRepEncoder[A].encode), CRepEncoder[A].encode(default))
+  }
 
   implicit val hnilEncoder: CStructEncoder[HNil] = convertS(_ => CStruct(Nil))
 
@@ -76,7 +83,8 @@ object CRepEncoder {
   implicit def genericEncoder[A, R](
     implicit
     gen: LabelledGeneric.Aux[A, R],
-    enc: Lazy[CStructEncoder[R]]
+    enc: Lazy[CStructEncoder[R]],
+    evidenceANotOption: A <:!< Option[_]
   ): CStructEncoder[A] =
     convertS(a => enc.value.encode(gen.to(a)))
 }
